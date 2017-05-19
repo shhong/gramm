@@ -69,17 +69,27 @@ classdef gramm < matlab.mixin.Copyable
             'xintercept',[],...
             'yintercept',[],...
             'style',[],...
-            'fun',[])
+            'fun',[],...
+            'extent',[])
+        
+        %structure containing polygon parameters - Nicholas Schaub 2017-Mar-07
+        polygon = struct('on',false,...
+                         'x',{[]},...
+                         'y',{[]},...
+                         'color_options',{[]},...
+                         'line_style',{[]},...
+                         'color',[],...
+                         'line_color',[],...
+                         'alpha',[],...
+                         'extent',[]);
         
         datetick_params={} %cell containng datetick parameters
         current_row %What is the currently drawn row of the subplot
         current_column %What is the currently drawn column of the subplot
         
-        continuous_color=false %Do we use continuous colors (rather than discrete)
+        continuous_color_options; %Structure holding continuous color options
         
-        continuous_color_colormap=[];
-        
-        color_options %Structure holding color options
+        color_options  %Structure holding color options
         
         order_options %Structure holding order options
         
@@ -168,6 +178,7 @@ classdef gramm < matlab.mixin.Copyable
             %Run the set_xx_options() functions without arguments to set
             %defaults
             set_names(obj);
+            set_continuous_color(obj,'active',false);
             set_order_options(obj);
             set_color_options(obj);
             set_text_options(obj);
@@ -209,6 +220,7 @@ classdef gramm < matlab.mixin.Copyable
         obj=geom_count(obj,varargin)
         obj=geom_jitter(obj,varargin)
         obj=geom_abline(obj,varargin)
+        obj=geom_polygon(obj,varargin)
         obj=geom_vline(obj,varargin)
         obj=geom_hline(obj,varargin)
         obj=geom_funline(obj,varargin)
