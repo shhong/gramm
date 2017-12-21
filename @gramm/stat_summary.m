@@ -152,7 +152,10 @@ if iscell(draw_data.x) || iscell(draw_data.y) %If input was provided as cell/mat
         uni_x=linspace(obj.var_lim.minx,obj.var_lim.maxx,params.interp_in);
         [x,y]=cellfun(@(x,y)deal(uni_x,interp1(x,y,uni_x,'linear')),draw_data.x,draw_data.y,'UniformOutput',false,'ErrorHandler',@(st,a,b)deal([],[]));
         y=padded_cell2mat(y);
-        
+        if isempty(y) %likely because we had only single points
+            y = nan(size(uni_x));
+            disp('Error in summary input interpolation... nothing plotted')
+        end
     else
         %If not we just make a padded matrix for fast
         %computations (we'll assume that X are roughly at the
@@ -333,9 +336,13 @@ obj.results.stat_summary{obj.result_ind,1}.yci=yci;
 hndl=plotci(obj,uni_x,ymean,yci,draw_data,params.geom,params.dodge,params.width);
 
 %Copy handles
-hnames=fieldnames(hndl);
-for k=1:length(hnames)
-    obj.results.stat_summary{obj.result_ind,1}.(hnames{k})=hndl.(hnames{k});
+if isstruct(hndl)
+    hnames=fieldnames(hndl);
+    for k=1:length(hnames)
+        obj.results.stat_summary{obj.result_ind,1}.(hnames{k})=hndl.(hnames{k});
+    end
+else
+    disp('Nothing plotted... Error in summary computation?')
 end
 end
 

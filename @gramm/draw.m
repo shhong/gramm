@@ -15,7 +15,7 @@ function obj=draw(obj,do_redraw)
 
 %We set redraw() as resize callback by default
 if nargin<2
-    do_redraw=true;
+    do_redraw=obj(1).layout_options.redraw;
 end
 
 %If no parent was given we use the current figure
@@ -62,14 +62,20 @@ if numel(obj)>1
         end
     end
     
+    
     nl=size(obj,1);
     nc=size(obj,2);
     for l=1:nl
         for c=1:nc
-            obj(l,c).multi.orig=[(nl-l)*maxh/nl (c-1)/nc];
-            obj(l,c).multi.size=[maxh/nl 1/nc];
+            if strcmp(obj(l,c).layout_options.position,'auto')
+                obj(l,c).multi.orig=[(nl-l)*maxh/nl (c-1)/nc];
+                obj(l,c).multi.size=[maxh/nl 1/nc];
+            else
+                obj(l,c).multi.orig=[obj(l,c).layout_options.position(2)*maxh obj(l,c).layout_options.position(1)];
+                obj(l,c).multi.size=[obj(l,c).layout_options.position(4)*maxh obj(l,c).layout_options.position(3)];
+            end
+            obj(l,c).layout_options.redraw_gap=obj(l,c).layout_options.redraw_gap/max(nl,nc);
             obj(l,c).multi.active=true;
-            obj(l,c).redraw_spacing=obj(l,c).redraw_spacing/max(nl,nc);
             draw(obj(l,c));
         end
     end
@@ -106,7 +112,7 @@ if ~iscell(uni_fig)
     uni_fig=num2cell(uni_fig);
 end
 if numel(uni_fig)>1 %if multiple figures
-    fig_pos=get(obj.parent,'Position'); %We'll create them wirth the same location and size as the current figure
+    fig_pos=get(obj.parent,'Position'); %We'll create them with the same location and size as the current figure
     %Convert to a cell
     obj={obj};
     for ind_fig=2:numel(uni_fig) %Make shallow copy of original object
@@ -116,14 +122,22 @@ if numel(uni_fig)>1 %if multiple figures
         %disp(['Plotting Fig ' num2str(ind_fig)])
         %We plot what we want by setlecting within aes on the basis of fig
         obj{ind_fig}.aes=select_aes(obj{ind_fig}.aes,multi_sel(obj{ind_fig}.aes.fig,uni_fig{ind_fig}));
-        %Set title
-         obj{ind_fig}.set_title([obj{ind_fig}.aes_names.fig ': ' num2str(uni_fig{ind_fig})]);
-         %Create figure and do the drawing
-        if ind_fig>1
-            obj{ind_fig}.parent=figure('Position',fig_pos);
+        % Skip if there is no data
+        if any(obj{ind_fig}.aes.subset)
+            %Set title
+            obj{ind_fig}.set_title([obj{ind_fig}.aes_names.fig ': ' num2str(uni_fig{ind_fig})]);
+            %Create figure and do the drawing
+            if ind_fig>1
+                obj{ind_fig}.parent=figure('Position',fig_pos);
+            end
+            obj{ind_fig}.draw();
         end
-        obj{ind_fig}.draw();
     end
+    return;
+end
+
+if ~any(obj.aes.subset)
+    disp('Empty subset, nothing to draw');
     return;
 end
 
@@ -173,19 +187,28 @@ end
 %that it restricts the drawing (using margins) to a portion of
 %the figure
 mysubtightplot=@(m,n,p,gap,marg_h,marg_w)my_tightplot(m,n,p,...
-    [gap(1)*obj.multi.size(1) gap(2)*obj.multi.size(2)],...
+    [gap(2)*obj.multi.size(1) gap(1)*obj.multi.size(2)],...
     [obj.multi.orig(1)+obj.multi.size(1)*marg_h(1) 1-obj.multi.orig(1)-obj.multi.size(1)*(1-marg_h(2))],...
     [obj.multi.orig(2)+obj.multi.size(2)*marg_w(1) 1-obj.multi.orig(2)-obj.multi.size(2)*(1-marg_w(2))],'Parent',obj.parent);
 
 %Set subplot generation parameters and functions
-if obj.force_ticks  %Independent scales require more space between subplots for ticks
-    mysubplot=@(nrow,ncol,row,col)mysubtightplot(nrow,ncol,(row-1)*ncol+col,[0.06 0.06],[0.1 0.2],[0.1 0.2]);
+if strcmp(obj.layout_options.gap,'auto')
+    if obj.force_ticks  %Independent scales require more space between subplots for ticks
+        mysubplot=@(nrow,ncol,row,col)mysubtightplot(nrow,ncol,(row-1)*ncol+col,[0.06 0.06],obj.layout_options.margin_height,obj.layout_options.margin_width);  
+    else
+        mysubplot=@(nrow,ncol,row,col)mysubtightplot(nrow,ncol,(row-1)*ncol+col,[0.02 0.02],obj.layout_options.margin_height,obj.layout_options.margin_width);
+    end
 else
-    mysubplot=@(nrow,ncol,row,col)mysubtightplot(nrow,ncol,(row-1)*ncol+col,[0.02 0.02],[0.1 0.2],[0.1 0.2]);
+    mysubplot=@(nrow,ncol,row,col)mysubtightplot(nrow,ncol,(row-1)*ncol+col,obj.layout_options.gap,obj.layout_options.margin_height,obj.layout_options.margin_width);
 end
+
 %Subplots for wraps leave more space above axes for column
 %legend
-mysubplot_wrap=@(ncol,col)mysubtightplot(ceil(ncol/obj.wrap_ncols),obj.wrap_ncols,col,[0.09 0.03],[0.1 0.2],[0.1 0.2]);
+if strcmp(obj.layout_options.gap,'auto')
+    mysubplot_wrap=@(ncol,col)mysubtightplot(ceil(ncol/obj.wrap_ncols),obj.wrap_ncols,col,[0.03 0.09],obj.layout_options.margin_height,obj.layout_options.margin_width);
+else
+    mysubplot_wrap=@(ncol,col)mysubtightplot(ceil(ncol/obj.wrap_ncols),obj.wrap_ncols,col,obj.layout_options.gap,obj.layout_options.margin_height,obj.layout_options.margin_width);
+end
 
 %Find uniques in aesthetics and sort according to options
 uni_row=unique_and_sort(temp_aes.row,obj.order_options.row);
@@ -550,7 +573,7 @@ for ind_row=1:length(uni_row)
         
         %Show facet values in titles
         if obj.updater.first_draw || obj.updater.facet_updated
-            if length(uni_column)>1
+            if length(uni_column)>1 && obj.column_labels
                 if ~isempty(obj.aes_names.column)
                     column_string=[obj.aes_names.column ': ' num2str(uni_column{ind_column})];
                 else
@@ -571,7 +594,7 @@ for ind_row=1:length(uni_row)
                         'Parent',obj.facet_axes_handles(ind_row,ind_column))];
                 end
             end
-            if length(uni_row)>1
+            if length(uni_row)>1  && obj.row_labels
                 if ~isempty(obj.aes_names.row)
                     row_string=[obj.aes_names.row ': ' num2str(uni_row{ind_row})];
                 else
@@ -641,6 +664,7 @@ end
 
 % ensuring grouping variables are cellstrs
 str_uni_color = cellfun(@num2str,uni_color,'UniformOutput',false);
+str_uni_lightness = cellfun(@num2str,uni_lightness,'UniformOutput',false);
 str_uni_linestyle = cellfun(@num2str,uni_linestyle,'UniformOutput',false);
 str_uni_size = cellfun(@num2str,uni_size,'UniformOutput',false);
 str_uni_marker = cellfun(@num2str,uni_marker,'UniformOutput',false);
@@ -648,11 +672,23 @@ str_uni_marker = cellfun(@num2str,uni_marker,'UniformOutput',false);
 
 %Create axes for legends
 if obj.updater.first_draw
-    obj.legend_axe_handle=axes('Position',[obj.multi.orig(2)+0.85*obj.multi.size(2)...
-        obj.multi.orig(1)+0.1*obj.multi.size(1) 0.15*obj.multi.size(2) 0.8*obj.multi.size(1)],...
-        'Parent',obj.parent);
+    if strcmp(obj.layout_options.legend_position,'auto')
+        if strcmp(obj.layout_options.legend_width,'auto')
+            obj.legend_axe_handle=axes('Position',[obj.multi.orig(2)+0.85*obj.multi.size(2)...
+                obj.multi.orig(1)+0.1*obj.multi.size(1) 0.15*obj.multi.size(2) 0.8*obj.multi.size(1)],...
+                'Parent',obj.parent);
+        else
+            obj.legend_axe_handle=axes('Position',[obj.multi.orig(2)+(1-obj.layout_options.legend_width)*obj.multi.size(2)...
+                obj.multi.orig(1)+0.1*obj.multi.size(1) 0.15*obj.multi.size(2) 0.8*obj.multi.size(1)],...
+                'Parent',obj.parent);
+        end
+    else
+        obj.legend_axe_handle=axes('Position',obj.layout_options.legend_position,...
+                'Parent',obj.parent);
+    end
     hold on
     set(obj.legend_axe_handle,'Visible','off','NextPlot','add');
+    %set(obj.legend_axe_handle,'PlotBoxAspectRatio',[1 1 1]);
 else
     axes(obj.legend_axe_handle)
 end
@@ -660,260 +696,151 @@ end
 legend_y_step=1;
 legend_y_additional_step=0.5;
 
-if obj.with_legend
+if obj.layout_options.legend
+    
     % Color legend
     % If the color groups are the same as marker, linestyle or size groups
     % then there will be a common legend (handled by the marker, linestyle
     % or size legend).
-    if length(str_uni_color)>1 && ...
-                    ~(length(str_uni_color)==length(str_uni_marker) && all(strcmp(str_uni_color, str_uni_marker))) && ...
-                    ~(length(str_uni_color)==length(str_uni_linestyle) && all(strcmp(str_uni_color, str_uni_linestyle))) && ...
-                    ~(length(str_uni_color)==length(str_uni_size) && all(strcmp(str_uni_color, str_uni_size)))
+    if length(str_uni_color)>1 && any(strcmp(obj.color_options.legend,{'separate','separate_gray'})) % && ...
+            %~(length(str_uni_color)==length(str_uni_marker) && all(strcmp(str_uni_color, str_uni_marker))) && ...
+            %~(length(str_uni_color)==length(str_uni_linestyle) && all(strcmp(str_uni_color, str_uni_linestyle))) && ...
+            %~(length(str_uni_color)==length(str_uni_size) && all(strcmp(str_uni_color, str_uni_size)))
+        
         %Make a colormap with only the colors and no lightness
         color_legend_map=get_colormap(length(str_uni_color),1,obj.color_options);
         
-        obj.legend_text_handles=[obj.legend_text_handles...
-            text(1,obj.legend_y,obj.aes_names.color,...
-            'FontWeight','bold',...
-            'Interpreter',obj.text_options.interpreter,...
-            'FontName',obj.text_options.font,...
-            'FontSize',obj.text_options.base_size*obj.text_options.legend_title_scaling,...
-            'Parent',obj.legend_axe_handle)];
-        obj.legend_y=obj.legend_y-legend_y_step;
-        for ind_color=1:length(str_uni_color)
-            plot([1 2],[obj.legend_y obj.legend_y],'-','Color',color_legend_map(ind_color,:),'lineWidth',3,'Parent',obj.legend_axe_handle)
-            %line(1.5,obj.legend_y,'lineStyle','none','Marker','s','MarkerSize',12,'MarkerFaceColor',color_legend_map(ind_color,:),'MarkerEdgeColor','none')
-            %rectangle('Position',[1.25 obj.legend_y-0.25 0.5 0.5],'EdgeColor','none','FaceColor',color_legend_map(ind_color,:));
-            obj.legend_text_handles=[obj.legend_text_handles...
-                text(2.5,obj.legend_y,str_uni_color{ind_color},...
-                'FontName',obj.text_options.font,...
-                'FontSize',obj.text_options.base_size*obj.text_options.legend_scaling,...
-                'Interpreter',obj.text_options.interpreter,...
-                'Parent',obj.legend_axe_handle)];
-            obj.legend_y=obj.legend_y-legend_y_step;
-        end
+        fill_legend(obj,obj.aes_names.color,...
+            str_uni_color,...
+            'line',...
+            color_legend_map,...
+            'o','-',3,0);
     end
     
-    
     %Lightness legend
-    if length(uni_lightness)>1
-        obj.legend_y=obj.legend_y-legend_y_additional_step;
+    if length(uni_lightness)>1 && any(strcmp(obj.color_options.legend,{'separate','separate_gray','merge'}))
         
-        lightness_legend_map=pa_LCH2RGB([linspace(obj.color_options.lightness_range(1),obj.color_options.lightness_range(2),length(uni_lightness))' ...
-            zeros(length(uni_lightness),1)...
-            zeros(length(uni_lightness),1)]);
-        obj.legend_text_handles=[obj.legend_text_handles...
-            text(1,obj.legend_y,obj.aes_names.lightness,...
-            'FontWeight','bold',...
-            'Interpreter',obj.text_options.interpreter,...
-            'FontName',obj.text_options.font,...
-            'FontSize',obj.text_options.base_size*obj.text_options.legend_title_scaling,...
-            'Parent',obj.legend_axe_handle)];
-        
-        obj.legend_y=obj.legend_y-legend_y_step;
-        for ind_lightness=1:length(uni_lightness)
-            plot([1 2],[obj.legend_y obj.legend_y],'-','Color',lightness_legend_map(ind_lightness,:),'lineWidth',3,'Parent',obj.legend_axe_handle)
-            %line(1.5,obj.legend_y,'lineStyle','none','Marker','s','MarkerSize',12,'MarkerFaceColor',lightness_legend_map(ind_lightness,:),'MarkerEdgeColor','none')
-            
-            obj.legend_text_handles=[obj.legend_text_handles...
-                text(2.5,obj.legend_y,num2str(uni_lightness{ind_lightness}),...
-                'FontName',obj.text_options.font,...
-             	'FontSize',obj.text_options.base_size*obj.text_options.legend_scaling,...
-                'Interpreter',obj.text_options.interpreter,...
-                'Parent',obj.legend_axe_handle)];
-            
-            obj.legend_y=obj.legend_y-legend_y_step;
+        if ischar(obj.color_options.map) && strcmp(obj.color_options.map,'lch') && strcmp(obj.color_options.legend,'separate_gray')
+            %With LCH we can generate a correct desaturated legend
+            lightness_legend_map=pa_LCH2RGB([linspace(obj.color_options.lightness_range(1),obj.color_options.lightness_range(2),length(uni_lightness))' ...
+                zeros(length(uni_lightness),1)...
+                zeros(length(uni_lightness),1)]);
+        else
+            %Make a colormap with the first color
+            lightness_legend_map=get_colormap(1,length(str_uni_lightness),obj.color_options);
         end
+        
+        fill_legend(obj,obj.aes_names.lightness,...
+            str_uni_lightness,...
+            'line',...
+            lightness_legend_map,...
+            'o','-',3,0);
+    end
+    
+    if strcmp(obj.color_options.legend,'expand')
+        expanded_legend_map = get_colormap(length(str_uni_color),length(str_uni_lightness),obj.color_options);
+        expanded_legend_labels = cell(length(str_uni_color)*length(str_uni_lightness),1);
+        for uc = 1:length(str_uni_color)
+            for ul = 1:length(str_uni_lightness)
+                expanded_legend_labels{ (uc-1) * length(str_uni_lightness) + ul } = [str_uni_color{uc} ' / ' str_uni_lightness{ul} ];
+            end
+        end
+        
+        fill_legend(obj, [obj.aes_names.color ' / ' obj.aes_names.lightness],...
+            expanded_legend_labels,...
+            'line',...
+            expanded_legend_map,...
+            'o','-',3,0);
     end
     
     %Continuous color legend
     if obj.continuous_color_options.active
-        obj.legend_y=obj.legend_y-legend_y_additional_step;
+
+        fill_gradient_legend(obj,obj.aes_names.color,...
+            linspace(obj.continuous_color_options.CLim(1), obj.continuous_color_options.CLim(2), 3),...
+            linspace(obj.continuous_color_options.CLim(1), obj.continuous_color_options.CLim(2), 5),...
+            4);
         
-        obj.legend_text_handles=[obj.legend_text_handles...
-            text(1,obj.legend_y,obj.aes_names.color,...
-            'FontWeight','bold',...
-            'Interpreter',obj.text_options.interpreter,...
-            'FontName',obj.text_options.font,...
-            'FontSize',obj.text_options.base_size*obj.text_options.legend_title_scaling,...
-            'Parent',obj.legend_axe_handle)];
-        
-        obj.legend_y=obj.legend_y-legend_y_step; %HACK here, we have to multiply by 2 ??
-        
-        tmp_N=100;
-        
-        gradient_height=4;
-        %imagesc coordinates correspond to centers of patches, hence the
-        %x=[1.5 1.5] to get [1 2] borders
-        imagesc([1.5 1.5],...
-            [obj.legend_y-legend_y_step*gradient_height obj.legend_y],...
-            linspace(obj.continuous_color_options.CLim(1),obj.continuous_color_options.CLim(2),tmp_N)',...
-            'Parent',obj.legend_axe_handle);
-        
-        line([1.8  2;1.8  2;1.8  2 ; 1 1.2 ; 1 1.2 ; 1 1.2]',...
-            [obj.legend_y-legend_y_step*gradient_height/4 obj.legend_y-legend_y_step*gradient_height/4 ;...
-            obj.legend_y-legend_y_step*gradient_height/2 obj.legend_y-legend_y_step*gradient_height/2 ;...
-            obj.legend_y-legend_y_step*3*gradient_height/4 obj.legend_y-legend_y_step*3*gradient_height/4;...
-            obj.legend_y-legend_y_step*gradient_height/4 obj.legend_y-legend_y_step*gradient_height/4 ;...
-            obj.legend_y-legend_y_step*gradient_height/2 obj.legend_y-legend_y_step*gradient_height/2 ;...
-            obj.legend_y-legend_y_step*3*gradient_height/4 obj.legend_y-legend_y_step*3*gradient_height/4]',...
-            'Color','w','Parent',obj.legend_axe_handle)
-        
-        
-        colormap(obj.continuous_color_options.colormap)
-        caxis(obj.continuous_color_options.CLim);
-        
-        obj.legend_text_handles=[obj.legend_text_handles...
-            text(2.5,obj.legend_y,num2str(obj.continuous_color_options.CLim(2)),...
-            'FontName',obj.text_options.font,...
-            'FontSize',obj.text_options.base_size*obj.text_options.legend_scaling,...
-            'Parent',obj.legend_axe_handle)];
-        
-        obj.legend_text_handles=[obj.legend_text_handles...
-            text(2.5,obj.legend_y-legend_y_step*gradient_height/2,num2str(mean(obj.continuous_color_options.CLim)),...
-            'FontName',obj.text_options.font,...
-            'FontSize',obj.text_options.base_size*obj.text_options.legend_scaling,...
-            'Parent',obj.legend_axe_handle)];
-        
-        obj.legend_text_handles=[obj.legend_text_handles...
-            text(2.5,obj.legend_y-legend_y_step*gradient_height,num2str(obj.continuous_color_options.CLim(1)),...
-            'FontName',obj.text_options.font,...
-            'FontSize',obj.text_options.base_size*obj.text_options.legend_scaling,...
-            'Parent',obj.legend_axe_handle)];
-        
-        obj.legend_y=obj.legend_y-legend_y_step*(gradient_height+1);
     end
     
     %marker legend
     if length(str_uni_marker)>1
-        obj.legend_y=obj.legend_y-legend_y_additional_step;
-        
+
         % If marker groups are the same as color groups we combine the
         % legends by drawing each marker legend the corresponding color
-        if length(str_uni_color)==length(str_uni_marker) && all(strcmp(str_uni_color, str_uni_marker))
+        if strcmp(obj.color_options.legend,'merge') && length(str_uni_color)==length(str_uni_marker) && all(strcmp(str_uni_color, str_uni_marker))
             color_legend_map = get_colormap(length(str_uni_marker), 1, obj.color_options);
         else
-            color_legend_map = zeros(length(str_uni_marker), 3); %Otherwise in black
+            color_legend_map = [0 0 0]; %zeros(length(str_uni_marker), 3); %Otherwise in black
         end
         
-        obj.legend_text_handles=[obj.legend_text_handles...
-            text(1,obj.legend_y,obj.aes_names.marker,...
-            'FontWeight','bold',...
-            'Interpreter',obj.text_options.interpreter,...
-            'FontName',obj.text_options.font,...
-            'FontSize',obj.text_options.base_size*obj.text_options.legend_title_scaling,...
-            'Parent',obj.legend_axe_handle)];
         
-        obj.legend_y=obj.legend_y-legend_y_step;
-        for ind_marker=1:length(str_uni_marker)
-            plot(1.5,obj.legend_y,obj.point_options.markers{ind_marker},'MarkerEdgeColor','none','MarkerFaceColor', color_legend_map(ind_marker, :), 'Parent',obj.legend_axe_handle)
-            
-            obj.legend_text_handles=[obj.legend_text_handles...
-                text(2.5,obj.legend_y,str_uni_marker{ind_marker},...
-                'Interpreter',obj.text_options.interpreter,...
-                'FontName',obj.text_options.font,...
-                'FontSize',obj.text_options.base_size*obj.text_options.legend_scaling,...
-                'Parent',obj.legend_axe_handle)];
-            
-            obj.legend_y=obj.legend_y-legend_y_step;
-        end
+        fill_legend(obj,obj.aes_names.marker,...
+            str_uni_marker,...
+            'point',...
+            color_legend_map,...
+            obj.point_options.markers,'-',0,obj.point_options.base_size);
     end
     
     %linestyle legend
     if length(str_uni_linestyle)>1
-        obj.legend_y=obj.legend_y-legend_y_additional_step;
 
         % If linestyle groups are the same as color groups we combine the
         % legends by drawing each linestyle legend the corresponding color
-        if length(str_uni_color)==length(str_uni_linestyle) && all(strcmp(str_uni_color, str_uni_linestyle))
+        if strcmp(obj.color_options.legend,'merge') && length(str_uni_color)==length(str_uni_linestyle) && all(strcmp(str_uni_color, str_uni_linestyle))
             color_legend_map = get_colormap(length(str_uni_linestyle), 1, obj.color_options);
         else
-            color_legend_map = zeros(length(str_uni_linestyle), 3); %Otherwise in black
+            color_legend_map = [0 0 0]; %Otherwise in black
         end
- 
-        obj.legend_text_handles=[obj.legend_text_handles...
-            text(1,obj.legend_y,obj.aes_names.linestyle,...
-            'FontWeight','bold',...
-            'Interpreter',obj.text_options.interpreter,...
-            'FontName',obj.text_options.font,...
-            'FontSize',obj.text_options.base_size*obj.text_options.legend_title_scaling,...
-            'Parent',obj.legend_axe_handle)];
         
-        obj.legend_y=obj.legend_y-legend_y_step;
-        for ind_linestyle=1:length(str_uni_linestyle)
-            plot([1 2],[obj.legend_y obj.legend_y],obj.line_options.styles{ind_linestyle}, 'Color', color_legend_map(ind_linestyle, :) ,'Parent',obj.legend_axe_handle,'lineWidth',3)
-            
-            obj.legend_text_handles=[obj.legend_text_handles...
-                text(2.5,obj.legend_y,str_uni_linestyle{ind_linestyle},...
-                'Interpreter',obj.text_options.interpreter,...
-                'FontName',obj.text_options.font,...
-                'FontSize',obj.text_options.base_size*obj.text_options.legend_scaling,...
-                'Parent',obj.legend_axe_handle)];
-            
-            obj.legend_y=obj.legend_y-legend_y_step;
-        end
+        
+        fill_legend(obj,obj.aes_names.linestyle,...
+            str_uni_linestyle,...
+            'line',...
+            color_legend_map,...
+            'o',obj.line_options.styles,3,0);
     end
     
     %Size legend
     if length(str_uni_size)>1
-        obj.legend_y=obj.legend_y-legend_y_additional_step;
-        
+
         % If size groups are the same as color groups we combine the
         % legends by drawing each size legend the corresponding color
-        if length(str_uni_color)==length(str_uni_size) && all(strcmp(str_uni_color, str_uni_size))
+        if strcmp(obj.color_options.legend,'merge') && length(str_uni_color)==length(str_uni_size) && all(strcmp(str_uni_color, str_uni_size))
             color_legend_map = get_colormap(length(str_uni_size), 1, obj.color_options);
         else
-            color_legend_map = zeros(length(str_uni_size), 3); %Otherwise in black
+            color_legend_map = [0 0 0]; %Otherwise in black
         end
-
-
-        obj.legend_text_handles=[obj.legend_text_handles...
-            text(1,obj.legend_y,obj.aes_names.size,...
-            'FontWeight','bold',...
-            'Interpreter',obj.text_options.interpreter,...
-            'FontName',obj.text_options.font,...
-            'FontSize',obj.text_options.base_size*obj.text_options.legend_title_scaling,...
-            'Parent',obj.legend_axe_handle)];
-       
-        obj.legend_y=obj.legend_y-legend_y_step;
-        for ind_size=1:length(str_uni_size)
-            
-            if obj.line_options.use_input
-               temp_lw=obj.line_options.input_fun(uni_size{ind_size});
-            else
-                temp_lw=obj.line_options.base_size+(ind_size-1)*obj.line_options.step_size;
-            end
-            
-            plot([1 2],[obj.legend_y obj.legend_y],'lineWidth',temp_lw,...
-                'Color',color_legend_map(ind_size,:),'Parent',obj.legend_axe_handle)
-            
-            if obj.point_options.use_input
-                temp_ps=obj.point_options.input_fun(uni_size{ind_size});
-            else
-                temp_ps=obj.point_options.base_size+(ind_size-1)*obj.point_options.step_size;
-            end
-            plot(1,obj.legend_y,'o','markerSize',temp_ps,...
-                'MarkerEdgeColor','none','MarkerFaceColor',color_legend_map(ind_size,:),'Parent',obj.legend_axe_handle)
-            
-            obj.legend_text_handles=[obj.legend_text_handles...
-                text(2.5,obj.legend_y,str_uni_size{ind_size},...
-                'Interpreter',obj.text_options.interpreter,...
-                'FontName',obj.text_options.font,...
-                'FontSize',obj.text_options.base_size*obj.text_options.legend_scaling,...
-                'Parent',obj.legend_axe_handle)];
-            
-            obj.legend_y=obj.legend_y-legend_y_step;
+        
+        % Handle cases where sizes are defined by the input calues instead
+        % of discrete categories ('use_input' in set_line_options() and set_point_options() ) 
+        if obj.line_options.use_input
+            temp_lw=obj.line_options.input_fun([uni_size{:}]);
+        else
+            temp_lw=obj.line_options.base_size+(0:length(str_uni_size)-1)*obj.line_options.step_size;
         end
+        if obj.point_options.use_input
+            temp_ps=obj.point_options.input_fun([uni_size{:}]);
+        else
+            temp_ps=obj.point_options.base_size+(0:length(str_uni_size)-1)*obj.point_options.step_size;
+        end
+        
+        fill_legend(obj,obj.aes_names.size,...
+            str_uni_size,...
+            'both',...
+            color_legend_map,...
+            'o','-',temp_lw,temp_ps);
     end
 end
+
 %Set size of legend axes
-set(obj.legend_axe_handle,'XLim',[1 8])
+set(obj.legend_axe_handle,'XLim',[1 8]);
 %xlim([1 8])
 if obj.legend_y<0
-    set(obj.legend_axe_handle,'YLim',[obj.legend_y 1])
+    set(obj.legend_axe_handle,'YLim',[obj.legend_y 1]);
     %ylim([obj.legend_y 1])
 end
-
+%set(obj.legend_axe_handle,'DataAspectRatio',[1 1 1]);
 
 %If we go from many to one facet, the new content is drawn only
 %on the first facet so needs to be copied in the other one
